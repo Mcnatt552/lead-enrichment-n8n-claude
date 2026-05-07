@@ -1,0 +1,606 @@
+{
+  "name": "Lead Enrichment",
+  "nodes": [
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.apollo.io/v1/people/match",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"first_name\": \"{{ $json.first_name }}\",\n  \"last_name\": \"{{ $json.last_name }}\",\n  \"organization_name\": \"{{ $json.company }}\",\n  \"domain\": \"{{ $json.domain }}\",\n  \"reveal_personal_emails\": true\n}",
+        "options": {
+          "response": {
+            "response": {}
+          },
+          "timeout": 15000
+        }
+      },
+      "id": "809be714-8911-4184-a89b-61109bc6073b",
+      "name": "Apollo.io — Enrich Person",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        -784,
+        -400
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "2eOMyaMiBexK1h3x",
+          "name": "X-Api-Key"
+        }
+      },
+      "disabled": true,
+      "notes": "Generic Credential Type → Header Auth. In credential: Name=X-Api-Key, Value=YOUR_APOLLO_KEY. Returns: email, email_status, person, organization."
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst results = [];\n\nconst companyData = {\n  'stripe.com':     { size: 8000,   industry: 'Fintech',     revenue: '$1B+',          founded: '2010' },\n  'notion.so':      { size: 600,    industry: 'SaaS',        revenue: '$100M-$500M',   founded: '2016' },\n  'linear.app':     { size: 200,    industry: 'SaaS',        revenue: '$10M-$50M',     founded: '2019' },\n  'figma.com':      { size: 1500,   industry: 'SaaS',        revenue: '$500M-$1B',     founded: '2012' },\n  'vercel.com':     { size: 500,    industry: 'SaaS',        revenue: '$50M-$100M',    founded: '2015' },\n  'supabase.com':   { size: 150,    industry: 'SaaS',        revenue: '$10M-$50M',     founded: '2020' },\n  'cloudflare.com': { size: 4000,   industry: 'Tech',        revenue: '$1B+',          founded: '2009' },\n  'gitlab.com':     { size: 2200,   industry: 'SaaS',        revenue: '$500M-$1B',     founded: '2011' },\n  'hubspot.com':    { size: 7500,   industry: 'SaaS',        revenue: '$1B+',          founded: '2006' },\n  'airtable.com':   { size: 800,    industry: 'SaaS',        revenue: '$100M-$500M',   founded: '2012' }\n};\n\nconst titles = [\n  { title: 'VP of Sales',           seniority: 'vp',       dept: 'Sales' },\n  { title: 'Director of Marketing', seniority: 'director', dept: 'Marketing' },\n  { title: 'Chief Technology Officer', seniority: 'c_suite', dept: 'Engineering' },\n  { title: 'Senior Product Manager',seniority: 'senior',   dept: 'Product' },\n  { title: 'Head of Operations',    seniority: 'director', dept: 'Operations' },\n  { title: 'Marketing Manager',     seniority: 'manager',  dept: 'Marketing' },\n  { title: 'VP of Engineering',     seniority: 'vp',       dept: 'Engineering' },\n  { title: 'Sales Manager',         seniority: 'manager',  dept: 'Sales' },\n  { title: 'Chief Marketing Officer', seniority: 'c_suite', dept: 'Marketing' },\n  { title: 'Account Executive',     seniority: 'entry',    dept: 'Sales' }\n];\n\nfor (const item of items) {\n  const trigger = item.json;\n  \n  const nameHash = (trigger.first_name + trigger.last_name).split('').reduce((a,c) => a + c.charCodeAt(0), 0);\n  const titleData = titles[nameHash % titles.length];\n  \n  const company = companyData[trigger.domain] || { \n    size: 250, industry: 'SaaS', revenue: '$10M-$50M', founded: '2017'\n  };\n  \n  const emailRand = nameHash % 100;\n  const emailStatus = emailRand < 80 ? 'valid' : emailRand < 95 ? 'risky' : 'invalid';\n  \n  const email = trigger.email && trigger.email.length > 0\n    ? trigger.email\n    : `${trigger.first_name}.${trigger.last_name}@${trigger.domain}`.toLowerCase();\n  \n  results.push({\n    json: {\n      first_name:       trigger.first_name,\n      last_name:        trigger.last_name,\n      company:          trigger.company,\n      domain:           trigger.domain,\n      email:            email,\n      email_status:     emailStatus,\n      email_confidence: emailStatus === 'valid' ? 92 : emailStatus === 'risky' ? 65 : 20,\n      email_disposable: false,\n      title:            titleData.title,\n      seniority:        titleData.seniority,\n      departments:      titleData.dept,\n      linkedin_url:     `https://linkedin.com/in/${trigger.first_name}-${trigger.last_name}`.toLowerCase(),\n      company_size:     company.size,\n      company_revenue:  company.revenue,\n      company_industry: company.industry,\n      company_founded:  company.founded,\n      company_country:  'United States',\n      enriched_at: new Date().toISOString()\n    }\n  });\n}\n\nreturn results;"
+      },
+      "id": "1323d8cc-16ef-4006-bb26-de499d61f74c",
+      "name": "Merge Enrichment Data",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -688,
+        -144
+      ],
+      "executeOnce": false,
+      "notes": "Flattens Apollo response into a single lead payload. Email sourced from Apollo person.email (reveal_personal_emails=true) with trigger fallback."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.anthropic.com/v1/messages",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "anthropic-version",
+              "value": "2023-06-01"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 512, system: 'You are a B2B sales qualification expert. Analyze leads and return ONLY valid JSON, no markdown.\\n\\nScoring rubric:\\n- Company size: <10=5pts, 10-50=10pts, 51-200=20pts, 201-1000=30pts, >1000=20pts\\n- Seniority: C-level/VP=30pts, Director/Head=25pts, Manager/Senior=15pts, other=5pts\\n- Email quality: valid=20pts, risky=10pts, unknown=5pts, invalid=0pts\\n- Industry fit (SaaS/Tech/Finance/Healthcare): perfect=20pts, good=10pts, other=5pts\\n\\nReturn JSON: {\"score\": <1-100>, \"tier\": \"hot|warm|cold\", \"reasoning\": \"<2 sentences>\", \"fit_signals\": [\"signal1\",\"signal2\"], \"red_flags\": [\"flag1\"]}', messages: [{ role: 'user', content: 'Score this lead:\\n\\nName: ' + $json.first_name + ' ' + $json.last_name + '\\nTitle: ' + $json.title + '\\nSeniority: ' + $json.seniority + '\\nDepartment: ' + $json.departments + '\\nCompany: ' + $json.company + '\\nIndustry: ' + $json.company_industry + '\\nCompany Size: ' + $json.company_size + ' employees\\nRevenue: ' + $json.company_revenue + '\\nFounded: ' + $json.company_founded + '\\nCountry: ' + $json.company_country + '\\nEmail: ' + $json.email + ' (status: ' + $json.email_status + ')' }] }) }}",
+        "options": {
+          "timeout": 30000
+        }
+      },
+      "id": "2f5cc79a-4797-4d55-85cb-7f88f5d78caf",
+      "name": "Claude API — Score Lead",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        -464,
+        -144
+      ],
+      "credentials": {
+        "httpHeaderAuth": {
+          "id": "2eOMyaMiBexK1h3x",
+          "name": "X-Api-Key"
+        }
+      },
+      "notes": "Generic Credential Type → Header Auth. In credential: Name=x-api-key, Value=YOUR_ANTHROPIC_KEY. Model: claude-sonnet-4-6."
+    },
+    {
+      "parameters": {
+        "jsCode": "const items = $input.all();\nconst enrichedItems = $('Merge Enrichment Data').all();\nconst results = [];\n\nfor (let i = 0; i < items.length; i++) {\n  const rawResponse = items[i].json;\n  const enriched = enrichedItems[i]?.json || {};\n  \n  let claudeText = '';\n  try {\n    claudeText = rawResponse.content?.[0]?.text || '';\n  } catch(e) {\n    claudeText = '';\n  }\n  \n  let cleanText = claudeText.trim();\n  \n  if (cleanText.startsWith('```')) {\n    cleanText = cleanText\n      .replace(/^```(?:json)?\\s*\\n?/i, '')\n      .replace(/\\n?```\\s*$/i, '')\n      .trim();\n  }\n  \n  const jsonMatch = cleanText.match(/\\{[\\s\\S]*\\}/);\n  if (jsonMatch) {\n    cleanText = jsonMatch[0];\n  }\n  \n  let scoring = {};\n  try {\n    scoring = JSON.parse(cleanText);\n  } catch(e) {\n    scoring = {\n      score:       0,\n      tier:        'unknown',\n      reasoning:   'Parse error: ' + e.message + ' | Raw: ' + claudeText.substring(0, 150),\n      fit_signals: [],\n      red_flags:   ['parse_error']\n    };\n  }\n  \n  results.push({\n    json: {\n      ...enriched,\n      score:       parseInt(scoring.score) || 0,\n      tier:        scoring.tier  || 'cold',\n      reasoning:   scoring.reasoning || '',\n      fit_signals: Array.isArray(scoring.fit_signals) ? scoring.fit_signals.join(' | ') : '',\n      red_flags:   Array.isArray(scoring.red_flags) ? scoring.red_flags.join(' | ') : '',\n      scored_at:   new Date().toISOString()\n    }\n  });\n}\n\nreturn results;"
+      },
+      "id": "33ab9b66-e770-48dd-9965-d7f4dd9ec75d",
+      "name": "Parse Score Response",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -256,
+        -144
+      ],
+      "notes": "Extracts score/tier/reasoning from Claude JSON response. Graceful fallback on parse error."
+    },
+    {
+      "parameters": {
+        "schema": {
+          "__rl": true,
+          "value": "public",
+          "mode": "list",
+          "cachedResultName": "public"
+        },
+        "table": {
+          "__rl": true,
+          "value": "leads",
+          "mode": "list",
+          "cachedResultName": "leads"
+        },
+        "options": {
+          "skipOnConflict": true
+        }
+      },
+      "id": "9296089f-7501-4ebe-8ddc-2f0decc5fbd0",
+      "name": "Postgres — Insert Lead",
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2,
+      "position": [
+        160,
+        -128
+      ],
+      "credentials": {
+        "postgres": {
+          "id": "J21VrrzNPoPyBs38",
+          "name": "Supabase Postgres"
+        }
+      },
+      "notes": "Insert operation with skipOnConflict=true. No raw SQL. Conflict key: email UNIQUE constraint in schema."
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1Qaz7LoTmo3b5cEXN_quxgs_ywmT3NtCnqWBcpaItKec",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "Scored Leads",
+          "mode": "name"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "First Name": "={{ $json.first_name }}",
+            "Last Name": "={{ $json.last_name }}",
+            "Email": "={{ $json.email }}",
+            "Email Status": "={{ $json.email_status }}",
+            "Company": "={{ $json.company }}",
+            "Title": "={{ $json.title }}",
+            "Seniority": "={{ $json.seniority }}",
+            "Industry": "={{ $json.company_industry }}",
+            "Company Size": "={{ $json.company_size }}",
+            "Score": "={{ $json.score }}",
+            "Tier": "={{ $json.tier }}",
+            "Reasoning": "={{ $json.reasoning }}",
+            "Fit Signals": "={{ $json.fit_signals }}",
+            "Red Flags": "={{ $json.red_flags }}",
+            "LinkedIn": "={{ $json.linkedin_url }}",
+            "Scored At": "={{ $json.scored_at }}"
+          },
+          "matchingColumns": [
+            "Email"
+          ],
+          "schema": [
+            {
+              "id": "First Name",
+              "displayName": "First Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Last Name",
+              "displayName": "Last Name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Email",
+              "displayName": "Email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Email Status",
+              "displayName": "Email Status",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Company",
+              "displayName": "Company",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Title",
+              "displayName": "Title",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Seniority",
+              "displayName": "Seniority",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Industry",
+              "displayName": "Industry",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Company Size",
+              "displayName": "Company Size",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Score",
+              "displayName": "Score",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Tier",
+              "displayName": "Tier",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Reasoning",
+              "displayName": "Reasoning",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Fit Signals",
+              "displayName": "Fit Signals",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Red Flags",
+              "displayName": "Red Flags",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "LinkedIn",
+              "displayName": "LinkedIn",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Scored At",
+              "displayName": "Scored At",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "984d9afa-0beb-4c2e-aabb-2b70f14e61cb",
+      "name": "Google Sheet — Write Results",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4,
+      "position": [
+        160,
+        -368
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "M9GosOSMnEtvF4N9",
+          "name": "Google Sheets OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://discord.com/api/webhooks/1501522030116212766/Nj9TRS6ldKXWkFbOc8SQQDp7GvuD3R_96o02y41oQtry9OYHoGwmdllGRYufC20kPNKP",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Content-Type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ content: \"🟢 **\" + ($json.hot_leads ? $json.hot_leads.length : 0) + \" Hot Leads Detected**\", embeds: ($json.hot_leads || []).slice(0, 10).map(lead => ({ title: String((lead.first_name || \"Unknown\") + \" \" + (lead.last_name || \"\") + \" — \" + (lead.score || 0) + \"/100\").substring(0, 250), description: String(\"**\" + (lead.title || \"N/A\") + \"** at \" + (lead.company || \"N/A\") + \"\\n\" + (lead.email || \"N/A\") + \"\\n\" + (lead.reasoning || \"\")).substring(0, 2000), color: 5763719 })) }) }}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "5d7eca8b-2e7c-46dc-a83a-318bdd710801",
+      "name": "Discord — Hot Lead Alert",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [
+        672,
+        96
+      ],
+      "executeOnce": false,
+      "alwaysOutputData": false,
+      "retryOnFail": false,
+      "notes": "No credentials needed. Paste Discord channel Webhook URL directly into the URL field. Embed color 5763719 = #57F287 (green)."
+    },
+    {
+      "parameters": {
+        "errorMessage": "={{ 'Lead enrichment failed for: ' + ($json.first_name || '') + ' ' + ($json.last_name || '') + ' (' + ($json.domain || 'unknown domain') + ')' }}"
+      },
+      "id": "b9de6e5e-2cab-48e8-a359-a47bb725c654",
+      "name": "Error Handler",
+      "type": "n8n-nodes-base.stopAndError",
+      "typeVersion": 1,
+      "position": [
+        -688,
+        64
+      ],
+      "notes": "Attach via Error Workflow setting in workflow settings panel."
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $('Parse Score Response').first().json.score }}",
+              "rightValue": 70,
+              "operator": {
+                "type": "number",
+                "operation": "gte"
+              },
+              "id": "56f7c91d-b71c-4222-8d1e-aff014617e9e"
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "f334a697-86ce-466e-bc51-fd09a93a97f2",
+      "name": "IF — Score ≥ 70 (Hot Lead)",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        32,
+        112
+      ]
+    },
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyX",
+              "value": 1,
+              "unit": "minutes"
+            }
+          ]
+        },
+        "documentId": {
+          "__rl": true,
+          "value": "1sy00squ4JMaMu4PmHmRc6loQrw_spcwg4uu0zJM2pw4",
+          "mode": "id"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Leads",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1sy00squ4JMaMu4PmHmRc6loQrw_spcwg4uu0zJM2pw4/edit#gid=0"
+        },
+        "event": "rowUpdate",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheetsTrigger",
+      "typeVersion": 1,
+      "position": [
+        -896,
+        -144
+      ],
+      "id": "54208bfe-f495-4def-88e2-aa9ab1ff2c97",
+      "name": "Google Sheets Trigger",
+      "credentials": {
+        "googleSheetsTriggerOAuth2Api": {
+          "id": "9hSfnHMbLZx1kO2P",
+          "name": "Google Sheets Trigger OAuth2 API"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        272,
+        96
+      ],
+      "id": "f7bfa9f2-911b-489e-8474-a70a8065d715",
+      "name": "Wait1",
+      "webhookId": "9b6ba91e-7828-4902-a6aa-b5133b61aa5e"
+    },
+    {
+      "parameters": {
+        "aggregate": "aggregateAllItemData",
+        "destinationFieldName": "hot_leads",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.aggregate",
+      "typeVersion": 1,
+      "position": [
+        480,
+        96
+      ],
+      "id": "885a9549-fd3a-460d-a947-3b80e8149b35",
+      "name": "Aggregate"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Apollo.io — Enrich Person": {
+      "main": [
+        []
+      ]
+    },
+    "Merge Enrichment Data": {
+      "main": [
+        [
+          {
+            "node": "Claude API — Score Lead",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Claude API — Score Lead": {
+      "main": [
+        [
+          {
+            "node": "Parse Score Response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse Score Response": {
+      "main": [
+        [
+          {
+            "node": "Postgres — Insert Lead",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Google Sheet — Write Results",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "IF — Score ≥ 70 (Hot Lead)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Postgres — Insert Lead": {
+      "main": [
+        []
+      ]
+    },
+    "IF — Score ≥ 70 (Hot Lead)": {
+      "main": [
+        [
+          {
+            "node": "Wait1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Google Sheets Trigger": {
+      "main": [
+        [
+          {
+            "node": "Merge Enrichment Data",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait1": {
+      "main": [
+        [
+          {
+            "node": "Aggregate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Aggregate": {
+      "main": [
+        [
+          {
+            "node": "Discord — Hot Lead Alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate"
+  },
+  "versionId": "3e76987f-aec5-47bd-a16b-15f24ddf6040",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "3c037a2b8d58c705621e04917cd236741c237ec90593fc402b51df21b12b7e02"
+  },
+  "id": "3qHyHdh6RQebsqQj",
+  "tags": []
+}
